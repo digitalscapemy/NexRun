@@ -27,8 +27,20 @@ export const serverEnvironmentSchema = z.object({
   NEXT_PUBLIC_APP_URL: httpUrlSchema,
   UPLOADTHING_TOKEN: z.string().min(32),
   CRON_SECRET: optionalSecretSchema,
-  RESEND_API_KEY: z.string().min(1).optional(),
-  RESEND_FROM_EMAIL: z.string().email().optional().default("noreply@nexrun.my"),
+  RESEND_API_KEY: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().min(1).optional(),
+  ),
+  RESEND_FROM_EMAIL: z.preprocess(
+    (value) => {
+      if (typeof value !== "string") return undefined;
+      let str = value.trim().replace(/^["']|["']$/g, "");
+      if (!str) return undefined;
+      const match = str.match(/<([^>]+)>/);
+      return match ? match[1].trim() : str;
+    },
+    z.string().email().optional().default("noreply@nexrun.my"),
+  ),
   MOCK_PAYMENT_MODE: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
   TRUST_PROXY_HEADERS: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   DATABASE_POOL_MAX: integerFromEnvironment(10, 1, 50),
