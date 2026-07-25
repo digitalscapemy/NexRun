@@ -35,6 +35,7 @@ ENV DATABASE_URL=postgresql://build:build@127.0.0.1:5432/nexrun_build
 ENV BETTER_AUTH_SECRET=build-only-placeholder-not-a-production-secret
 ENV BETTER_AUTH_URL="https://nexrun.digitalscape.my"
 ENV UPLOADTHING_TOKEN=build-only-placeholder-not-a-production-token
+ENV RESEND_FROM_EMAIL="noreply@digitalscape.my"
 ENV MOCK_PAYMENT_MODE=true
 ENV TRUST_PROXY_HEADERS=false
 
