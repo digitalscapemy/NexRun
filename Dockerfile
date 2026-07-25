@@ -6,6 +6,7 @@ WORKDIR /app
 RUN apk add --no-cache libc6-compat
 
 COPY package*.json ./
+COPY prisma ./prisma
 RUN npm ci
 
 # Stage 2: Database migrator
