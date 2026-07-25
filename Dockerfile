@@ -66,10 +66,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 # ========================================================
-# COPY FAIL DATABASE UNTUK RUN MIGRATION & SEED DI CONSOLE
+# COPY FAIL DATABASE & SOURCE UNTUK RUN MIGRATION & SEED
 # ========================================================
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/src/generated/prisma ./src/generated/prisma
+COPY --from=builder --chown=nextjs:nodejs /app/src ./src
 
 USER nextjs
 
