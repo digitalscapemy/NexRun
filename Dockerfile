@@ -30,11 +30,10 @@ COPY . .
 # NEXT_PUBLIC values are compiled into the client bundle. The remaining values
 # are non-secret build placeholders so real runtime credentials never enter a
 # build layer or image history.
-ARG NEXT_PUBLIC_APP_URL
-ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+ENV NEXT_PUBLIC_APP_URL="https://nexrun.digitalscape.my"
 ENV DATABASE_URL=postgresql://build:build@127.0.0.1:5432/nexrun_build
 ENV BETTER_AUTH_SECRET=build-only-placeholder-not-a-production-secret
-ENV BETTER_AUTH_URL=${NEXT_PUBLIC_APP_URL}
+ENV BETTER_AUTH_URL="https://nexrun.digitalscape.my"
 ENV UPLOADTHING_TOKEN=build-only-placeholder-not-a-production-token
 ENV MOCK_PAYMENT_MODE=true
 ENV TRUST_PROXY_HEADERS=false
