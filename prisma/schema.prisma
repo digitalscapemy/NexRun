@@ -1,0 +1,874 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+enum Role {
+  DEVELOPER
+  ADMIN
+  ORGANIZER
+  USER
+}
+
+enum OrganizationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum OrganizationMemberRole {
+  OWNER
+  MANAGER
+  OPERATIONS
+  FINANCE
+  CHECKIN_STAFF
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+}
+
+enum OrganizerApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum OrganizerDocumentType {
+  SSM
+  BANK_STATEMENT
+  IDENTITY_DOCUMENT
+  OTHER
+}
+
+enum OrganizerFeeStatus {
+  PENDING
+  PROCESSING
+  PAID
+  WAIVED
+  VOID
+}
+
+enum EventStatus {
+  DRAFT
+  PENDING_APPROVAL
+  NEEDS_CHANGES
+  AWAITING_EVENT_FEE
+  PUBLISHED
+  REGISTRATION_CLOSED
+  COMPLETED
+  CANCELLED
+}
+
+enum TicketGender {
+  MALE
+  FEMALE
+  ALL
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum VoucherApplicationPolicy {
+  PER_ORDER
+  PER_PARTICIPANT
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+  EXPIRED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  ONLINE_BANKING
+  EWALLET
+  CARD
+}
+
+enum RegistrationStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum SettlementStatus {
+  UNSETTLED
+  READY
+  PROCESSING
+  SETTLED
+  FAILED
+}
+
+enum ReservationStatus {
+  RESERVED
+  COMMITTED
+  RELEASED
+  EXPIRED
+}
+
+enum MockPaymentScenario {
+  SUCCESS
+  DECLINED
+  PENDING
+  TIMEOUT
+  CANCELLED
+}
+
+// ----------------------------------------------------
+// 1. Authentication & Access (Better Auth)
+// ----------------------------------------------------
+
+model User {
+  id                   String        @id @default(cuid())
+  email                String        @unique
+  name                 String?
+  emailVerified        Boolean       @default(false)
+  image                String?
+  role                 Role          @default(USER)
+  activeOrganizationId String?
+  activeOrganization   Organization? @relation("UserActiveOrganization", fields: [activeOrganizationId], references: [id], onDelete: SetNull)
+  bannedAt             DateTime?
+  banReason            String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  sessions             Session[]
+  accounts             Account[]
+  userProfile          UserProfile?
+  organizations        Organization[]
+  organizationMembers  OrganizationMember[]
+  orders               Order[]
+  checkInsPerformed    CheckIn[]              @relation("CheckedInBy")
+  settlementsPerformed Settlement[]           @relation("SettledBy")
+  platformSettings     PlatformSetting[]
+  auditLogs            AuditLog[]             @relation("AuditActor")
+  eventStatusChanges   EventStatusHistory[]   @relation("EventStatusActor")
+  applicationsReviewed OrganizerApplication[] @relation("OrganizerApplicationReviewer")
+  organizerFeesWaived  OrganizerFee[]         @relation("OrganizerFeeWaiver")
+  notifications        Notification[]
+  consentRecords       ConsentRecord[]
+
+  @@index([activeOrganizationId])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String    @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime? @default(now())
+  updatedAt  DateTime? @updatedAt
+
+  @@index([identifier])
+  @@index([expiresAt])
+  @@map("verification")
+}
+
+model RateLimit {
+  id          String @id @default(cuid())
+  key         String @unique
+  count       Int
+  lastRequest BigInt
+
+  @@index([lastRequest])
+  @@map("rateLimit")
+}
+
+model UserProfile {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName    String
+  nationality String   @default("Malaysian")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ----------------------------------------------------
+// 2. Organizer Module
+// ----------------------------------------------------
+
+model Organization {
+  id              String             @id @default(cuid())
+  companyName     String
+  ssmNumber       String             @unique
+  contactPerson   String
+  email           String
+  phone           String
+  address         String
+  bankName        String
+  bankAccountNo   String
+  bankAccountName String
+  ssmDocumentUrl  String?
+  status          OrganizationStatus @default(PENDING)
+  userId          String
+  user            User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  applications OrganizerApplication[]
+  documents    OrganizerDocument[]
+  fees         OrganizerFee[]
+  events       Event[]
+  settlements  Settlement[]
+  members      OrganizationMember[]
+  activeUsers  User[]                 @relation("UserActiveOrganization")
+
+  @@index([userId])
+}
+
+model OrganizationMember {
+  id             String                 @id @default(cuid())
+  organizationId String
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           OrganizationMemberRole @default(OWNER)
+  status         MembershipStatus       @default(ACTIVE)
+  invitedAt      DateTime?
+  acceptedAt     DateTime?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@unique([organizationId, userId])
+  @@index([userId, status])
+}
+
+model OrganizerApplication {
+  id               String                     @id @default(cuid())
+  organizationId   String
+  organization     Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  status           OrganizerApplicationStatus @default(PENDING)
+  reviewerNotes    String?
+  reviewedByUserId String?
+  reviewedBy       User?                      @relation("OrganizerApplicationReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  reviewedAt       DateTime?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+
+  @@index([organizationId, status, createdAt])
+  @@index([reviewedByUserId])
+}
+
+model OrganizerDocument {
+  id             String                @id @default(cuid())
+  organizationId String
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  documentType   OrganizerDocumentType
+  fileUrl        String
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@index([organizationId, documentType])
+}
+
+model OrganizerFee {
+  id               String             @id @default(cuid())
+  organizationId   String
+  organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  eventId          String             @unique
+  event            Event              @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  amountSen        Int
+  status           OrganizerFeeStatus @default(PENDING)
+  invoiceNumber    String             @unique
+  paymentReference String?            @unique
+  issuedAt         DateTime           @default(now())
+  dueAt            DateTime?
+  paidAt           DateTime?
+  waivedAt         DateTime?
+  waivedByUserId   String?
+  waivedBy         User?              @relation("OrganizerFeeWaiver", fields: [waivedByUserId], references: [id], onDelete: SetNull)
+  waiverReason     String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  paymentAttempts OrganizerFeePaymentAttempt[]
+
+  @@index([organizationId, status])
+  @@index([status, issuedAt])
+  @@index([waivedByUserId])
+}
+
+model OrganizerFeePaymentAttempt {
+  id             String              @id @default(cuid())
+  organizerFeeId String
+  organizerFee   OrganizerFee        @relation(fields: [organizerFeeId], references: [id], onDelete: Cascade)
+  provider       String
+  status         PaymentStatus
+  scenario       MockPaymentScenario
+  transactionId  String?             @unique
+  amountSen      Int
+  idempotencyKey String              @unique
+  failureReason  String?
+  processedAt    DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([organizerFeeId, createdAt])
+  @@index([organizerFeeId, status])
+}
+
+// ----------------------------------------------------
+// 3. Event Module
+// ----------------------------------------------------
+
+model Event {
+  id                    String       @id @default(cuid())
+  title                 String
+  slug                  String       @unique
+  description           String
+  bannerImageUrl        String
+  eventDate             DateTime
+  startTime             String
+  endTime               String
+  venue                 String
+  fullAddress           String
+  state                 String
+  locationMapUrl        String?
+  registrationOpenDate  DateTime
+  registrationCloseDate DateTime
+  repcDate              String
+  repcTime              String
+  repcLocation          String
+  organizationId        String
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  featured              Boolean      @default(false)
+  ageReferenceDate      DateTime
+  timeZone              String       @default("Asia/Kuala_Lumpur")
+  status                EventStatus  @default(DRAFT)
+  termsNotes            String?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  images              EventImage[]
+  timelineItems       EventTimelineItem[]
+  categories          TicketCategory[]
+  vouchers            Voucher[]
+  orders              Order[]
+  registrations       Registration[]
+  organizerFee        OrganizerFee?
+  settlements         Settlement[]
+  raceBibTemplate     RaceBibTemplate?
+  certificateTemplate CertificateTemplate?
+  reminderDeliveries  RaceReminderDelivery[]
+  statusHistory       EventStatusHistory[]
+
+  @@index([status, eventDate])
+  @@index([organizationId])
+}
+
+model EventStatusHistory {
+  id          String       @id @default(cuid())
+  eventId     String
+  event       Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  fromStatus  EventStatus?
+  toStatus    EventStatus
+  notes       String?
+  actorUserId String?
+  actor       User?        @relation("EventStatusActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  createdAt   DateTime     @default(now())
+
+  @@index([eventId, createdAt])
+  @@index([actorUserId, createdAt])
+}
+
+model EventImage {
+  id        String   @id @default(cuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  imageUrl  String
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([eventId])
+}
+
+model EventTimelineItem {
+  id          String   @id @default(cuid())
+  eventId     String
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  title       String
+  timestamp   DateTime
+  location    String?
+  description String?
+  orderIndex  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([eventId])
+}
+
+model TicketCategory {
+  id                   String       @id @default(cuid())
+  eventId              String
+  event                Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name                 String
+  distance             Float
+  ageMin               Int
+  ageMax               Int
+  gender               TicketGender @default(ALL)
+  priceSen             Int
+  earlyBirdPriceSen    Int?
+  earlyBirdDeadline    DateTime?
+  maxSlots             Int?
+  currentRegistrations Int          @default(0)
+  startSaleDate        DateTime?
+  endSaleDate          DateTime?
+  isActive             Boolean      @default(true)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  orderItems    OrderItem[]
+  registrations Registration[]
+  reservations  InventoryReservation[]
+
+  @@index([eventId])
+}
+
+model Voucher {
+  id                String                   @id @default(cuid())
+  code              String
+  discountType      DiscountType
+  discountValue     Int
+  maxUses           Int?
+  currentUses       Int                      @default(0)
+  validFrom         DateTime
+  validUntil        DateTime
+  eventId           String?
+  event             Event?                   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  applicationPolicy VoucherApplicationPolicy @default(PER_ORDER)
+  isActive          Boolean                  @default(true)
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  orders      Order[]
+  redemptions VoucherRedemption[]
+
+  @@unique([eventId, code])
+  @@index([eventId])
+}
+
+// ----------------------------------------------------
+// 4. Registration & Financial Module
+// ----------------------------------------------------
+
+model Order {
+  id               String      @id @default(cuid())
+  orderNumber      String      @unique
+  invoiceNumber    String      @unique
+  idempotencyKey   String?     @unique
+  currency         String      @default("MYR")
+  userId           String
+  user             User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  eventId          String
+  event            Event       @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  subtotalSen      Int
+  discountSen      Int         @default(0)
+  adminFeeSen      Int
+  processingFeeSen Int
+  totalPaidSen     Int
+  organizerNetSen  Int
+  voucherCode      String?
+  voucherId        String?
+  voucher          Voucher?    @relation(fields: [voucherId], references: [id], onDelete: SetNull)
+  status           OrderStatus @default(PENDING)
+  expiresAt        DateTime?
+  paidAt           DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  items               OrderItem[]
+  registrations       Registration[]
+  paymentTransactions PaymentTransaction[]
+  feeSnapshot         FeeSnapshot?
+  reservations        InventoryReservation[]
+  voucherRedemptions  VoucherRedemption[]
+  consentRecords      ConsentRecord[]
+
+  @@index([userId])
+  @@index([eventId])
+  @@index([status])
+  @@index([userId, status])
+  @@index([expiresAt])
+}
+
+model OrderItem {
+  id                       String             @id @default(cuid())
+  orderId                  String
+  order                    Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  participantProfileId     String
+  participantProfile       ParticipantProfile @relation(fields: [participantProfileId], references: [id], onDelete: Restrict)
+  ticketCategoryId         String
+  ticketCategory           TicketCategory     @relation(fields: [ticketCategoryId], references: [id], onDelete: Restrict)
+  ticketNameSnapshot       String
+  ticketPriceSenSnapshot   Int
+  distanceSnapshot         Float
+  adminFeeSnapshotSen      Int
+  processingFeeSnapshotSen Int
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+
+  registration Registration?
+
+  @@index([orderId])
+  @@index([participantProfileId])
+  @@index([ticketCategoryId])
+}
+
+model ParticipantProfile {
+  id                    String   @id @default(cuid())
+  fullName              String
+  icNumber              String
+  nationality           String   @default("Malaysian")
+  gender                String // MALE, FEMALE
+  phone                 String
+  email                 String
+  dateOfBirth           DateTime
+  tshirtType            String? // MICROFIBER, COTTON
+  tshirtSize            String? // XS, S, M, L, XL, XXL, 3XL
+  bloodType             String?
+  medicalConditions     String?
+  emergencyContactName  String
+  emergencyContactPhone String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  orderItems    OrderItem[]
+  registrations Registration[]
+}
+
+model Registration {
+  id                   String             @id @default(cuid())
+  registrationCode     String             @unique
+  orderId              String
+  order                Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItemId          String             @unique
+  orderItem            OrderItem          @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  eventId              String
+  event                Event              @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  participantProfileId String
+  participantProfile   ParticipantProfile @relation(fields: [participantProfileId], references: [id], onDelete: Restrict)
+  ticketCategoryId     String
+  ticketCategory       TicketCategory     @relation(fields: [ticketCategoryId], references: [id], onDelete: Restrict)
+  bibNumber            String?
+  qrCodeData           String?
+  isFinisher           Boolean            @default(false)
+  finishedAt           DateTime?
+  status               RegistrationStatus @default(ACTIVE)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  checkIn            CheckIn?
+  reminderDeliveries RaceReminderDelivery[]
+
+  @@unique([eventId, bibNumber])
+  @@index([orderId])
+  @@index([eventId])
+  @@index([participantProfileId])
+  @@index([ticketCategoryId])
+  @@index([registrationCode])
+}
+
+model PaymentTransaction {
+  id             String              @id @default(cuid())
+  orderId        String
+  order          Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider       String // MOCK_GATEWAY, etc.
+  paymentMethod  PaymentMethod?
+  status         PaymentStatus       @default(PENDING)
+  scenario       MockPaymentScenario @default(SUCCESS)
+  transactionId  String?             @unique
+  amountSen      Int
+  idempotencyKey String              @unique
+  failureReason  String?
+  processedAt    DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([orderId])
+}
+
+model InventoryReservation {
+  id               String            @id @default(cuid())
+  orderId          String
+  order            Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketCategoryId String
+  ticketCategory   TicketCategory    @relation(fields: [ticketCategoryId], references: [id], onDelete: Restrict)
+  quantity         Int
+  status           ReservationStatus @default(RESERVED)
+  expiresAt        DateTime
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@unique([orderId, ticketCategoryId])
+  @@index([ticketCategoryId, status, expiresAt])
+  @@index([status, expiresAt])
+}
+
+model VoucherRedemption {
+  id          String   @id @default(cuid())
+  voucherId   String
+  voucher     Voucher  @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  quantity    Int      @default(1)
+  discountSen Int
+  createdAt   DateTime @default(now())
+
+  @@unique([voucherId, orderId])
+  @@index([orderId])
+}
+
+model FeeSnapshot {
+  id                      String   @id @default(cuid())
+  orderId                 String   @unique
+  order                   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  adminFeePercentage      Int
+  processingFeePercentage Int
+  capturedAt              DateTime @default(now())
+}
+
+// ----------------------------------------------------
+// 5. Operations Module
+// ----------------------------------------------------
+
+model CheckIn {
+  id                String       @id @default(cuid())
+  registrationId    String       @unique
+  registration      Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  checkedInAt       DateTime     @default(now())
+  checkedInByUserId String
+  checkedInByUser   User         @relation("CheckedInBy", fields: [checkedInByUserId], references: [id], onDelete: Restrict)
+  stationName       String?
+  bibCollected      Boolean      @default(true)
+  shirtCollected    Boolean      @default(true)
+  packCollected     Boolean      @default(true)
+  notes             String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([checkedInByUserId])
+}
+
+// ----------------------------------------------------
+// 6. Settlement Module
+// ----------------------------------------------------
+
+model Settlement {
+  id                    String           @id @default(cuid())
+  organizationId        String
+  organization          Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  eventId               String           @unique
+  event                 Event            @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  totalGrossRevenueSen  Int
+  totalAdminFeeSen      Int
+  totalProcessingFeeSen Int
+  netPayableSen         Int
+  status                SettlementStatus @default(UNSETTLED)
+  settledAt             DateTime?
+  settledByUserId       String?
+  settledByUser         User?            @relation("SettledBy", fields: [settledByUserId], references: [id], onDelete: SetNull)
+  referenceNumber       String?          @unique
+  settlementDate        DateTime?
+  bankDetailsComplete   Boolean          @default(false)
+  periodStart           DateTime?
+  periodEnd             DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  @@index([organizationId])
+  @@index([eventId])
+}
+
+// ----------------------------------------------------
+// 7. Platform Module
+// ----------------------------------------------------
+
+model PlatformSetting {
+  id              String   @id @default(cuid())
+  key             String   @unique
+  value           String
+  description     String?
+  updatedByUserId String?
+  updatedByUser   User?    @relation(fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  @@index([updatedByUserId])
+}
+
+model PlatformJobRun {
+  id         String   @id @default(cuid())
+  jobName    String
+  status     String
+  startedAt  DateTime @default(now())
+  finishedAt DateTime?
+  summary    String?
+  metadata   Json?
+
+  @@index([jobName, startedAt])
+  @@index([status, startedAt])
+}
+
+model RaceReminderDelivery {
+  id             String       @id @default(cuid())
+  eventId        String
+  event          Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  registrationId String
+  registration   Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  reminderType   String
+  scheduledFor   DateTime
+  deliveredAt    DateTime?
+  status         String
+  notificationId String?
+  failureReason  String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([registrationId, reminderType])
+  @@index([eventId, scheduledFor])
+  @@index([status, createdAt])
+}
+
+// ----------------------------------------------------
+// 8. Phase 6 Models
+// ----------------------------------------------------
+
+model RaceBibTemplate {
+  id                String   @id @default(cuid())
+  eventId           String   @unique
+  event             Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  headerImageUrl    String?
+  footerImageUrl    String?
+  themeColor        String   @default("#F97316") // Default primary orange
+  fontFamily        String   @default("sans-serif")
+  startingBibNumber Int      @default(1001)
+  locationText      String?
+  templateData      Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model CertificateTemplate {
+  id           String   @id @default(cuid())
+  eventId      String   @unique
+  event        Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  orientation  String   @default("LANDSCAPE") // LANDSCAPE, PORTRAIT
+  preset       String   @default("CLASSIC") // CLASSIC, BOLD, MODERN, MINIMAL
+  themeColor   String   @default("#F97316")
+  customTexts  Json?
+  templateData Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ----------------------------------------------------
+// 9. Trust, notification and audit module
+// ----------------------------------------------------
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  actorUserId    String?
+  actor          User?    @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  organizationId String?
+  eventId        String?
+  action         String
+  entityType     String
+  entityId       String
+  summary        String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([eventId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model ConsentRecord {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderId     String?
+  order       Order?    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  consentType String
+  version     String
+  acceptedAt  DateTime  @default(now())
+  withdrawnAt DateTime?
+
+  @@index([userId, consentType])
+  @@index([orderId])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  message   String
+  href      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
+}
